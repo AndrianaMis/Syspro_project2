@@ -1,0 +1,77 @@
+# System Programming 2024 Project 2
+
+## JobCommander - jobExecutorServer
+
+Ο jobCommander (CLIENT) δίνει τη δυνατότητα στον χρήστη να αλληλεπιδράσει με τον
+jobExecutorServer μέσω απλών εντολών (commands). Οι εντολές δίνονται ως ορίσματα κατά
+την κλήση του jobCommander και στέλνονται μέσω διαδικτύου στον jobExecutorServer (SERVER).
+
+
+### Compilation
+
+```bash
+make all
+```
+
+Για διαγραφή των object files που δημιουργήθηκαν:
+
+```bash
+make clean
+```
+
+### Execution
+
+Ο jobExecutorServer ξεκινά πρώτος παίρνοντας ως ορίσματα από τη γραμμή εντολών: **[portnum] [bufferSize] [threadPoolSize] ** 
+
+Ο jobCommander παίρνει ως ορίσματα από τη γραμμή εντολών:  **[serverName] [portnum] [jobCommanderInputCommand]**
+
+Για παράδειγμα:
+
+```c
+./bin/jobExecutorServer 3050 5 8
+```
+
+```c
+./bin/jobCommander linux01.di.uoa.gr 3050 issueJob cat file.txt
+```
+Έχοντας ενεργοποιήσει τον jobExecutorServer από κάποιο linux machine, οποιοσδήποτε client μπορεί (με τα σωστά ορίσματα) να κάνει σύνδεση στον server
+
+
+## Description
+
+Διαθέσιμες εντολές ώς όρισμα του jobCommander:
+
+ - **'issueJob < job >'** : Εισάγεται η εργασία προς εκτέλεση στον κοινό ενταμιευτή. Στον jobCommander επιτρέφεται μήνυμα "JOB job_XX SUBMITTED" και το αποτέλεσμα της εκτέλεσης της εργασίας
+
+ - **'setConcurrency < N >'** : Αλλάζει τον βαμθό παραλλήλιας, δηλαδή το μέγιστο αριθμό ενεργών εργασιών που μπορεί να εκτελεί η εφαρμογή.Στον jobCommader επιστρέφεται μήνυμα "CONCURRENCY SET TO N" 
+
+ - **'stop < job_id >'** : Βγάζει από τον κοινόχρηστο ενταμιευτή το job με jobID==job_id. Στον jobCommander επιστρέφεται μήνυμα "JOB job_XX REMOVED" ή "JOB job_xx NOT FOUND"
+
+ - **'poll'** : Επιστέφει στον jobcommander τις εργασίες που βρίσκονται στον κοινό ενταμιευτή ή "No jobs in the buffer" αν ο ενταμιευτής είναι άδειος.
+
+ - **'exit'** : Τερματίζει τη λειτουργία του jobExecutorServer μετά την ολοκλήρωση όλων των εργασιών που τρέχουν και την επιστροφή των εξόδων τους στον αντίστοιχο πελάτη.
+
+
+
+- Ως κοινό ενταμιευτή χρησιμποιώ μια ουρά qu, ορίσμένη στο headers.h. H ουρά έχει συγκεκριμένο capacity (bufferSize) και περιέχει array τύπου tripl* με τα structs των εργασίων. 
+
+### Details
+
+Το αρχικό concurrency είναι 1. Αν δεν το αλλάξει κάποιος πελάτης, μόνο μια εργασία μπορεί να εκτελείται κάθε φορά. Δηλαδή, αν ένας πελάτη στείλει issueJob ./progDelay 10 , και ένας δεύτερος πελάτης
+στείλει issueJob ls -l , ο δεύτερος πελάτης θα περιμένει να τελείωσει η εκτέλεση του προηγούμενου job. Ωστόσο, αν κάποιος client έιχε στείλει εντολή για αλλαγή του concurrency
+π.χ. setConcurrency 2, τότε και οι δύο πελάτες θα εξυπηρετηθούν ταυτόχρονα από δυο διαφορετικά workers. 
+
+Μετά από το τέλος της εκτέλεσης κάθε εργασίας τύπου poll, stop, setConcurrency, και στο τέλος του execution από worker, στέλνω από τον server ένα ending message "END"
+στον πελάτη που την έστειλε, ώστε να κάνει exit από το reading loop ο πελάτης. 
+
+
+Επεξήγηση εντολής exit: Όταν ένας client στείλει την εντολή exit, το controller thread κάνει τα εξής βήματα: 
+1. Αναθέτει στην receiving_flag την τιμή 0. Η receiving_flag είναι μεταβολητή που ελέγχεται πριν από κάθε accept νέου πελάτη από το main thread. Αν αυτή η μεταβλητή γίνει 0, δεν μπορεί ο server να δεχτεί νέους πελάτες.
+2. Καθαρίζει την κοινόχρηστη ουρά με την συνάρτηση cleanq(), ώστε οι εργασίας που είναι προς εκτέλεσει και δεν τρέχουν εκείνη τη στιγμή, να διαγραφουύν. Επίσης στέλνει το μήνυμα 
+   "SERVER TERMINATED BEFORE EXECUTION" σε κάθε πελάτη που περιμένει την εκτέλεση της εργασίας του.
+3. Περιμένει μέχρι η μεταβλητή actives να γίνει 0. Η μεταβλητή αυτή δηλώνει το πόσα worker threads (δηλαδή εργασίες) τρέχυον εκείνη τη στιγμή.
+4. Κλείνει το client και server socket.
+5. Κάνει exit
+
+
+
